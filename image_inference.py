@@ -79,35 +79,38 @@ def preprocess_image_for_model(img: np.ndarray, tfms, device: torch.device) -> t
 	return x
 
 
-def detect_characters(image: np.ndarray, min_area: int = 100, max_area: int = 10000) -> List[Tuple[int, int, int, int]]:
-	"""
-	Detect potential character regions in the image.
-	Returns list of (x, y, w, h) bounding boxes.
-	"""
-	# Convert to grayscale
-	gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-	
-	# Apply threshold to get binary image
-	_, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-	
-	# Find contours
-	contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-	
-	# Filter contours by area and aspect ratio
-	character_boxes = []
-	for contour in contours:
-		area = cv2.contourArea(contour)
-		if min_area <= area <= max_area:
-			x, y, w, h = cv2.boundingRect(contour)
-			# Filter by aspect ratio (characters are usually roughly square-ish)
-			aspect_ratio = w / h
-			if 0.2 <= aspect_ratio <= 3.0:
-				character_boxes.append((x, y, w, h))
-	
-	# Sort by x-coordinate (left to right)
-	character_boxes.sort(key=lambda box: box[0])
-	
-	return character_boxes
+def detect_characters(image: np.ndarray, min_area: int = 50, max_area: int = 5000) -> List[Tuple[int, int, int, int]]:
+    """
+    Detect potential character regions using morphological ops + contours.
+    Returns list of (x, y, w, h) bounding boxes.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Adaptive threshold for uneven lighting
+    binary = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 21, 10
+    )
+
+    # Morph close to connect components
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+    # Find contours
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    character_boxes = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if min_area <= area <= max_area:
+            x, y, w, h = cv2.boundingRect(contour)
+            aspect_ratio = w / float(h)
+            if 0.2 <= aspect_ratio <= 3.0:  # filter very weird blobs
+                character_boxes.append((x, y, w, h))
+
+    # Sort left-to-right, top-to-bottom
+    character_boxes.sort(key=lambda b: (b[1], b[0]))
+
+    return character_boxes
 
 
 def extract_character_region(image: np.ndarray, box: Tuple[int, int, int, int], padding: int = 10) -> np.ndarray:
